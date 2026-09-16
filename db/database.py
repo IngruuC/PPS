@@ -16,10 +16,7 @@ SCHEMA_PATH = os.path.join(BASE_DIR, "db", "schema.sql")
 MODULOS = ["inventario", "personas", "prestamos", "seguridad"]
 ACCIONES = ["ver", "crear", "editar", "eliminar", "exportar"]
 
-# Usuario administrador por defecto (se debe cambiar la contraseña luego)
-ADMIN_USUARIO = "admin"
-ADMIN_PASSWORD = "admin123"
-ADMIN_NOMBRE_COMPLETO = "Administrador del Sistema"
+NOMBRE_GRUPO_ADMINISTRADOR = "Administrador"
 
 
 def conectar():
@@ -53,13 +50,13 @@ def _crear_grupo_administrador(conexion):
     """Crea el grupo Administrador y le asigna TODOS los permisos disponibles."""
     cursor = conexion.cursor()
 
-    cursor.execute("SELECT id FROM grupos WHERE nombre = 'Administrador'")
+    cursor.execute("SELECT id FROM grupos WHERE nombre = ?", (NOMBRE_GRUPO_ADMINISTRADOR,))
     fila = cursor.fetchone()
 
     if fila is None:
         cursor.execute(
             "INSERT INTO grupos (nombre, descripcion) VALUES (?, ?)",
-            ("Administrador", "Acceso total al sistema. Puede gestionar usuarios, grupos y permisos.")
+            (NOMBRE_GRUPO_ADMINISTRADOR, "Acceso total al sistema. Puede gestionar usuarios, grupos y permisos.")
         )
         id_grupo = cursor.lastrowid
     else:
@@ -78,43 +75,64 @@ def _crear_grupo_administrador(conexion):
     return id_grupo
 
 
-def _crear_usuario_admin_por_defecto(conexion, id_grupo_admin):
-    """Crea el usuario 'admin' con contraseña 'admin123' si todavía no existe ningún usuario."""
-    cursor = conexion.cursor()
-
-    cursor.execute("SELECT COUNT(*) AS total FROM usuarios")
-    total_usuarios = cursor.fetchone()["total"]
-
-    if total_usuarios == 0:
-        password_hash, salt = crear_password_hash(ADMIN_PASSWORD)
-        cursor.execute(
-            """
-            INSERT INTO usuarios
-                (nombre_usuario, password_hash, salt, nombre_completo, email, id_grupo, activo)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-            """,
-            (ADMIN_USUARIO, password_hash, salt, ADMIN_NOMBRE_COMPLETO, "", id_grupo_admin)
-        )
-        conexion.commit()
-        print(f"[PPS] Usuario administrador creado -> usuario: '{ADMIN_USUARIO}' / contraseña: '{ADMIN_PASSWORD}'")
-        print("[PPS] IMPORTANTE: cambiar esta contraseña desde el módulo de Seguridad apenas se ingrese.")
-
-
 def inicializar_bd():
-   
+
     es_primera_vez = not os.path.exists(DB_PATH)
 
     conexion = conectar()
     try:
         _crear_tablas(conexion)
         _cargar_permisos(conexion)
-        id_grupo_admin = _crear_grupo_administrador(conexion)
-        _crear_usuario_admin_por_defecto(conexion, id_grupo_admin)
+        _crear_grupo_administrador(conexion)
     finally:
         conexion.close()
 
     if es_primera_vez:
         print(f"[PPS] Base de datos creada correctamente en: {DB_PATH}")
+
+
+def existe_algun_usuario() -> bool:
+    """Indica si ya hay al menos un usuario cargado en el sistema."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT COUNT(*) AS total FROM usuarios")
+        return cursor.fetchone()["total"] > 0
+    finally:
+        conexion.close()
+
+
+def crear_usuario_administrador(nombre_usuario, password, nombre_completo, email=None) -> int:
+    """
+    Crea el primer usuario del sistema con el grupo Administrador.
+
+    Se usa desde la ventana de primer inicio, cuando todavía no existe
+    ningún usuario cargado en la base de datos.
+    """
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+
+        cursor.execute("SELECT id FROM grupos WHERE nombre = ?", (NOMBRE_GRUPO_ADMINISTRADOR,))
+        fila = cursor.fetchone()
+        if fila is None:
+            id_grupo_admin = _crear_grupo_administrador(conexion)
+        else:
+            id_grupo_admin = fila["id"]
+
+        password_hash, salt = crear_password_hash(password)
+        cursor.execute(
+            """
+            INSERT INTO usuarios
+                (nombre_usuario, password_hash, salt, nombre_completo, email, id_grupo, activo)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+            """,
+            (nombre_usuario, password_hash, salt, nombre_completo, email, id_grupo_admin)
+        )
+        conexion.commit()
+        return cursor.lastrowid
+    finally:
+        conexion.close()
 
 
 # Permite ejecutar este archivo solo (python db/database.py) para inicializar la BD a mano

@@ -1,0 +1,5 @@
+customtkinter>=5.2,<7
+Pillow>=10
+
+# tkinter no se instala vía pip: debe venir del Python del sistema
+# (macOS/Homebrew: brew install python-tk / Debian-Ubuntu: sudo apt install python3-tk)
